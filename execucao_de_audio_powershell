@@ -1,0 +1,230 @@
+<#
+.SYNOPSIS
+ Script hospitalar para execução de áudios fixos, programados e aleatórios com limite diário e nova rotina às 20:30.
+
+.DESCRIPTION
+ - Áudio fixo da Ouvidoria em horários fixos, de segunda a sexta.
+ - Áudios programados B1 a B6, executados em seus horários com repetições e alternância.
+ - Áudios aleatórios A1 a A6 com limite diário, balanceados entre 07:30 e 22:00.
+ - Nova demanda: execução alternada dos áudios B6, B5, B3, B4 e B2 às 20:30, 3 vezes cada.
+ - Logs com usuário e mensagens no console para acompanhamento detalhado.
+
+.NOTES
+ Criado por Henrique 26/09/2025; atualizado 09/11/2025 com nova demanda.
+#>
+
+# Pasta de áudio e logs
+$pastaAudios = "C:\execucao de audio"
+$arquivoOuvidoria = "Ouvidoria Alfa.mp3"
+$logDir = Join-Path $pastaAudios "logs"
+if (-not (Test-Path $logDir)) { New-Item -ItemType Directory -Path $logDir -Force | Out-Null }
+
+# Horários fixos da Ouvidoria (seg a sex)
+$horariosOuvidoria = @("09:00","10:00","11:00","13:00","14:00","15:00","16:00")
+
+# Áudios aleatórios A1 a A6
+$audiosAleatorios = @(
+    "A1 - Crachá dos acompanhantes..mp3",
+    "A2 - Gratuidade do Sus.mp3",
+    "A3 - Proibição de fumar.mp3",
+    "A4 - Proibição de venda.mp3",
+    "A5 - Responsabilidade de pertences.mp3",
+    "A6 - Risco de queda.mp3"
+)
+
+# Total execuções diárias para áudios aleatórios
+$totalExecucoesAleatoriasDia = 20
+
+# Definição do período para áudios aleatórios
+$inicioPeriodo = [datetime]::ParseExact("07:30","HH:mm",$null)
+$fimPeriodo = [datetime]::ParseExact("22:00","HH:mm",$null)
+
+# Cálculo do intervalo médio entre execuções aleatórias (em minutos)
+$intervaloMinutos = [math]::Round((($fimPeriodo - $inicioPeriodo).TotalMinutes) / $totalExecucoesAleatoriasDia)
+
+# Controle diário da última execução aleatória e contagem de execuções por áudio
+$ultimaExecucaoAleatoria = (Get-Date).AddDays(-1)
+$contagemExecucoesAleatorias = @{}
+foreach ($audio in $audiosAleatorios) { $contagemExecucoesAleatorias[$audio] = 0 }
+
+# Controle execuções Ouvidoria e data
+$executadosHojeOuvidoria = @()
+$ultimaData = (Get-Date).ToString("yyyy-MM-dd")
+
+# Função para registro de log com usuário, data e hora
+function Registrar-Log($msg) {
+    $usuario = $env:USERNAME
+    $dataHora = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
+    $logFile = Join-Path $logDir ("execucao_" + (Get-Date -Format "yyyy-MM-dd") + ".log")
+    "$dataHora - [$usuario] - $msg" | Out-File -FilePath $logFile -Append -Encoding utf8
+}
+
+# Função para tocar áudio e esperar concluir
+function Tocar-Audio($arquivoCompleto) {
+    if (Test-Path $arquivoCompleto) {
+        try {
+            Add-Type -AssemblyName presentationCore
+            $player = New-Object system.windows.media.mediaplayer
+            $player.open($arquivoCompleto)
+            $player.Play()
+
+            Registrar-Log "Iniciada execução do áudio: $arquivoCompleto"
+            Write-Host ">>> Iniciando execução do áudio:`n    $arquivoCompleto"
+
+            while ($player.Source -ne $null -and $player.NaturalDuration.HasTimeSpan -eq $false) { Start-Sleep -Milliseconds 200 }
+            while ($player.Position -lt $player.NaturalDuration.TimeSpan) { Start-Sleep -Milliseconds 200 }
+
+            Registrar-Log "Finalizada execução do áudio: $arquivoCompleto"
+            Write-Host "<<< Finalizada execução do áudio:`n    $arquivoCompleto`n"
+        }
+        catch {
+            Registrar-Log "Erro ao executar áudio: $($_.Exception.Message)"
+            Write-Host "!!! Erro ao executar áudio: $($_.Exception.Message)"
+        }
+    } else {
+        Registrar-Log "Arquivo não encontrado: $arquivoCompleto"
+        Write-Host "!!! Arquivo não encontrado: $arquivoCompleto"
+    }
+}
+
+# Função para tocar áudio múltiplas vezes com pausa
+function Tocar-Varias-Vezes($arquivo, $vezes) {
+    for ($i = 1; $i -le $vezes; $i++) {
+        Registrar-Log "Iniciando repetição $i de $vezes para $arquivo"
+        Write-Host ">> Repetição $i de $vezes para o áudio:`n    $arquivo"
+        Tocar-Audio $arquivo
+        Start-Sleep -Seconds 2
+    }
+}
+
+# Função para tocar dois áudios alternadamente
+function Tocar-Alternado($arquivo1, $arquivo2, $vezesCada) {
+    for ($i = 1; $i -le $vezesCada; $i++) {
+        Registrar-Log "Alternando áudio ($i/$vezesCada): $arquivo1"
+        Write-Host ">> Alternando áudio ($i/$vezesCada): $arquivo1"
+        Tocar-Audio $arquivo1
+        Start-Sleep -Seconds 2
+
+        Registrar-Log "Alternando áudio ($i/$vezesCada): $arquivo2"
+        Write-Host ">> Alternando áudio ($i/$vezesCada): $arquivo2"
+        Tocar-Audio $arquivo2
+        Start-Sleep -Seconds 2
+    }
+}
+
+# Função nova para alternar múltiplos áudios
+function Tocar-Alternado-Multiplo($arquivos, $vezes) {
+    for ($i = 1; $i -le $vezes; $i++) {
+        foreach ($arquivo in $arquivos) {
+            Registrar-Log "Alternando áudio ($i/$vezes): $arquivo"
+            Write-Host ">> Alternando áudio ($i/$vezes): $arquivo"
+            Tocar-Audio $arquivo
+            Start-Sleep -Seconds 2
+        }
+    }
+}
+
+Write-Host "=============================================="
+Write-Host "Iniciando monitoramento de áudio hospitalar..."
+Write-Host "Usuário: $($env:USERNAME)"
+Write-Host "Intervalo médio entre áudios aleatórios: $intervaloMinutos minutos"
+Write-Host "==============================================`n"
+
+while ($true) {
+    $agora = (Get-Date)
+    $horaStr = $agora.ToString("HH:mm")
+    $dataHoje = $agora.ToString("yyyy-MM-dd")
+    $diaSemana = $agora.DayOfWeek
+
+    # Reset diário de contadores e execuções
+    if ($ultimaData -ne $dataHoje) {
+        $executadosHojeOuvidoria = @()
+        $contagemExecucoesAleatorias.Clear()
+        foreach ($audio in $audiosAleatorios) { $contagemExecucoesAleatorias[$audio] = 0 }
+        $ultimaData = $dataHoje
+        Registrar-Log "==== Novo dia: $dataHoje ===="
+        Write-Host "`n==== Novo dia: $dataHoje ====`n"
+    }
+
+    # Executa áudios fixos da Ouvidoria (seg a sex)
+    if ($diaSemana -in @("Monday","Tuesday","Wednesday","Thursday","Friday")) {
+        if (($horariosOuvidoria -contains $horaStr) -and -not ($executadosHojeOuvidoria -contains $horaStr)) {
+            $arquivoCompleto = Join-Path $pastaAudios $arquivoOuvidoria
+            Registrar-Log "Horário Ouvidoria autorizado: $horaStr"
+            Write-Host "Horário Ouvidoria autorizado: $horaStr - Executando áudio..."
+            Tocar-Audio $arquivoCompleto
+            $executadosHojeOuvidoria += $horaStr
+            Start-Sleep -Seconds 10
+            continue
+        }
+    }
+
+    # Executa áudios programados B1 a B6 e novo bloco 20:30
+    $executouAudioFixo = $false
+    switch ($horaStr) {
+        "11:00" {
+            $arquivo = Join-Path $pastaAudios "B1_ENFER_01_06.mp3"
+            Write-Host "`nExecutando B1_ENFER_01_06 às $horaStr`n"
+            Tocar-Varias-Vezes $arquivo 3
+            $executouAudioFixo = $true
+        }
+        "15:00" {
+            $arquivo = Join-Path $pastaAudios "B6 - UTI_09.mp3"
+            Write-Host "`nExecutando B6 - UTI_09 às $horaStr`n"
+            Tocar-Varias-Vezes $arquivo 3
+            $executouAudioFixo = $true
+        }
+        "15:30" {
+            $arquivo = Join-Path $pastaAudios "B5 - UTI_08.mp3"
+            Write-Host "`nExecutando B5 - UTI_08 às $horaStr`n"
+            Tocar-Varias-Vezes $arquivo 3
+            $executouAudioFixo = $true
+        }
+        "16:30" {
+            $arquivo = Join-Path $pastaAudios "B3 - UTI_04.mp3"
+            Write-Host "`nExecutando B3 - UTI_04 às $horaStr`n"
+            Tocar-Varias-Vezes $arquivo 3
+            $executouAudioFixo = $true
+        }
+        "17:30" {
+            $arquivo1 = Join-Path $pastaAudios "B4 - UTI_05.mp3"
+            $arquivo2 = Join-Path $pastaAudios "B2 - UTI_01.mp3"
+            Write-Host "`nExecutando alternadamente B4 - UTI_05 e B2 - UTI_01 às $horaStr`n"
+            Tocar-Alternado $arquivo1 $arquivo2 3
+            $executouAudioFixo = $true
+        }
+        "20:30" {
+            $arquivos20h30 = @(
+                Join-Path $pastaAudios "B6 - UTI_09.mp3",
+                Join-Path $pastaAudios "B5 - UTI_08.mp3",
+                Join-Path $pastaAudios "B3 - UTI_04.mp3",
+                Join-Path $pastaAudios "B4 - UTI_05.mp3",
+                Join-Path $pastaAudios "B2 - UTI_01.mp3"
+            )
+            Write-Host "`nExecutando alternadamente 5 áudios às 20:30, 3 vezes cada`n"
+            Tocar-Alternado-Multiplo $arquivos20h30 3
+            $executouAudioFixo = $true
+        }
+    }
+
+    # Executa áudios aleatórios balanceados entre 07:30-22:00 se não for horário fixo
+    if (-not $executouAudioFixo) {
+        if (($agora -ge $inicioPeriodo) -and ($agora -le $fimPeriodo)) {
+            if (($agora - $ultimaExecucaoAleatoria).TotalMinutes -ge $intervaloMinutos) {
+                $disponiveis = $audiosAleatorios | Where-Object { $contagemExecucoesAleatorias[$_] -lt [math]::Ceiling($totalExecucoesAleatoriasDia / $audiosAleatorios.Count) }
+                if ($disponiveis.Count -gt 0) {
+                    $audioEscolhido = Get-Random -InputObject $disponiveis
+                    $arquivoAleatorio = Join-Path $pastaAudios $audioEscolhido
+                    Write-Host "`nExecutando áudio aleatório: $audioEscolhido às $horaStr`n"
+                    Tocar-Audio $arquivoAleatorio
+                    $contagemExecucoesAleatorias[$audioEscolhido]++
+                    $ultimaExecucaoAleatoria = $agora
+                } else {
+                    Write-Host "Limite diário de execuções aleatórias atingido."
+                }
+            }
+        }
+    }
+
+    Start-Sleep -Seconds 20
+}
